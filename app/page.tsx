@@ -1,6 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MusicStaff from "./MusicStaff";
+import {
+  addDays,
+  CURRICULUM,
+  EMPTY_PROFILE,
+  LEVELS,
+  PILLARS,
+  unitsForLevel,
+  type AttemptResult,
+  type CurriculumUnit,
+  type DailySession,
+  type LearningPillar,
+  type PracticeProfile,
+  type SkillMastery,
+} from "./learning";
 
 type ChordCategory = "Base" | "Séptimas" | "Extendidos" | "Color";
 
@@ -166,6 +181,46 @@ const PROGRESSIONS: ProgressionDefinition[] = [
 
 const EMPTY_HISTORY: PracticeHistory = { totalRounds: 0, totalChords: 0, learned: {}, days: {} };
 const STORAGE_KEY = "acorde-practice-v2";
+const LEARNING_STORAGE_KEY = "acorde-learning-v3";
+const READING_NOTES = ["C4", "D4", "E4", "G4"];
+const READING_MIDI = [60, 62, 64, 67];
+const SCALE_PATTERNS: Record<number, number[]> = {
+  1: [60, 62, 64, 65, 67, 65, 64, 62, 60],
+  2: [60, 62, 64, 65, 67, 69, 71, 72, 71, 69, 67, 65, 64, 62, 60],
+  3: [60, 64, 67, 71, 72, 71, 67, 64, 60],
+  4: [62, 65, 69, 72, 74, 72, 69, 65, 62],
+  5: [53, 59, 64, 69, 74, 69, 64, 59, 53],
+};
+const LEVEL_PROGRESSION_IDS: Record<number, string> = { 1: "pilares", 2: "pop", 3: "turnaround", 4: "dos-cinco-uno", 5: "ciclo-completo" };
+const MINOR_LEVEL_PROGRESSION_IDS: Record<number, string> = { 1: "menor-clasica", 2: "epica-menor", 3: "menor-septimas", 4: "dos-cinco-menor", 5: "menor-extendida" };
+const EAR_CHORDS_BY_LEVEL: Record<number, string[]> = {
+  1: ["major", "minor"],
+  2: ["major", "minor", "diminished", "sus4"],
+  3: ["major7", "minor7", "dominant7"],
+  4: ["half-diminished", "dominant7", "minor-major7"],
+  5: ["dominant-flat9", "major9", "thirteenth"],
+};
+const RHYTHM_PATTERNS: Record<number, { offsets: number[]; label: string }> = {
+  1: { offsets: [0, 1, 2, 3], label: "1 · 2 · 3 · 4" },
+  2: { offsets: [0, 2], label: "1 · — · 3 · —" },
+  3: { offsets: [0, 1.5, 2.5, 3.5], label: "1 · 2& · 3& · 4&" },
+  4: { offsets: [0, .5, 1.75, 3], label: "1 · 1& · 2a · 4" },
+  5: { offsets: [0, .75, 2, 3.25], label: "1 · 1a · 3 · 4e" },
+};
+
+function average(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function sequenceAccuracy(played: number[], target: number[], exactRegister = false) {
+  if (!target.length) return 0;
+  const correct = target.reduce((count, note, index) => count + (played[index] !== undefined && (exactRegister ? played[index] === note : mod(played[index]) === mod(note)) ? 1 : 0), 0);
+  return Math.round((correct / Math.max(target.length, played.length || 1)) * 100);
+}
+
+function daysBetween(a: string, b: string) {
+  return Math.round((new Date(`${b}T12:00:00`).getTime() - new Date(`${a}T12:00:00`).getTime()) / 86400000);
+}
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -179,6 +234,24 @@ function resolveProgressionStep(keyRoot: { name: string; pc: number }, step: Pro
   const name = spellFromDegree(keyRoot.name, step.degree, pc);
   const chord = CHORDS.find((item) => item.id === step.chordId) ?? CHORDS[0];
   return { pc, name, chord, notes: chord.intervals.map((interval) => 48 + pc + interval) };
+}
+
+function withClosestVoicings<T extends { notes: number[] }>(items: T[]) {
+  let previous: number[] | null = null;
+  return items.map((item) => {
+    if (!previous || previous.length !== item.notes.length) {
+      previous = item.notes;
+      return item;
+    }
+    const candidates: number[][] = [];
+    for (let inversion = 0; inversion < item.notes.length; inversion += 1) {
+      const voiced = item.notes.map((note, index) => index < inversion ? note + 12 : note).sort((a, b) => a - b);
+      [-12, 0, 12].forEach((shift) => candidates.push(voiced.map((note) => note + shift)));
+    }
+    const best = candidates.sort((a, b) => a.reduce((sum, note, index) => sum + Math.abs(note - previous![index]), 0) - b.reduce((sum, note, index) => sum + Math.abs(note - previous![index]), 0))[0];
+    previous = best;
+    return { ...item, notes: best };
+  });
 }
 
 function mod(value: number, size = 12) {
@@ -261,14 +334,15 @@ function inversionName(index: number, count: number) {
   return `${index}ª inversión de ${count - 1}`;
 }
 
-function PianoKeyboard({ targetNotes, activeNotes, noteNames, onDown, onUp }: {
+function PianoKeyboard({ targetNotes, activeNotes, noteNames, onDown, onUp, rangeStart = 36 }: {
   targetNotes: number[];
   activeNotes: Set<number>;
   noteNames: Map<number, string>;
   onDown: (note: number) => void;
   onUp: (note: number) => void;
+  rangeStart?: number;
 }) {
-  const allNotes = useMemo(() => Array.from({ length: 49 }, (_, index) => index + 36), []);
+  const allNotes = useMemo(() => Array.from({ length: 49 }, (_, index) => index + rangeStart), [rangeStart]);
   const whiteNotes = allNotes.filter((note) => ![1, 3, 6, 8, 10].includes(mod(note)));
   const blackNotes = allNotes.filter((note) => [1, 3, 6, 8, 10].includes(mod(note)));
   const targetPcs = new Set(targetNotes.map((note) => mod(note)));
@@ -406,7 +480,7 @@ function TheoryLesson({ lesson, rootName, chord, spelledNotes, mode }: {
 }
 
 export default function Home() {
-  const [view, setView] = useState<"practica" | "progresiones" | "teoria">("practica");
+  const [view, setView] = useState<"ruta" | "practica" | "progresiones" | "teoria">("ruta");
   const [keyRootIndex, setKeyRootIndex] = useState(0);
   const [rootIndex, setRootIndex] = useState(0);
   const [mode, setMode] = useState<"mayor" | "menor">("mayor");
@@ -435,6 +509,28 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const [demoStep, setDemoStep] = useState<number | null>(null);
   const [isPlayingProgression, setIsPlayingProgression] = useState(false);
+  const [learningProfile, setLearningProfile] = useState<PracticeProfile>(EMPTY_PROFILE);
+  const [mastery, setMastery] = useState<Record<string, SkillMastery>>({});
+  const [attempts, setAttempts] = useState<AttemptResult[]>([]);
+  const [dailySessions, setDailySessions] = useState<Record<string, DailySession>>({});
+  const [routePillar, setRoutePillar] = useState<LearningPillar>("Técnica");
+  const [routePlayed, setRoutePlayed] = useState<number[]>([]);
+  const [routeVelocities, setRouteVelocities] = useState<number[]>([]);
+  const [routeFeedback, setRouteFeedback] = useState("Conecta el MIDI o usa el teclado en pantalla para comenzar.");
+  const [routePassed, setRoutePassed] = useState(false);
+  const [routeAttemptDone, setRouteAttemptDone] = useState(false);
+  const [routeUsedHelp, setRouteUsedHelp] = useState(false);
+  const [learningSessionActive, setLearningSessionActive] = useState(false);
+  const [learningSessionIndex, setLearningSessionIndex] = useState(0);
+  const [diagnosticStep, setDiagnosticStep] = useState(-1);
+  const [routeApplicationStep, setRouteApplicationStep] = useState(0);
+  const [rhythmRunning, setRhythmRunning] = useState(false);
+  const [rhythmCountdown, setRhythmCountdown] = useState<number | null>(null);
+  const [rhythmEvents, setRhythmEvents] = useState<Array<{ note: number; at: number; velocity: number }>>([]);
+  const [sustainDown, setSustainDown] = useState(false);
+  const [midiRange, setMidiRange] = useState({ min: 36, max: 84 });
+  const [calibrationStage, setCalibrationStage] = useState<"idle" | "soft" | "medium" | "loud">("idle");
+  const [calibrationSamples, setCalibrationSamples] = useState<number[]>([]);
 
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
   const sustainedRef = useRef(new Set<number>());
@@ -448,6 +544,9 @@ export default function Home() {
   const progressionAdvanceTimerRef = useRef<number | null>(null);
   const demoTimersRef = useRef<number[]>([]);
   const demoVoicesRef = useRef(new Set<number>());
+  const rhythmTimersRef = useRef<number[]>([]);
+  const rhythmStartRef = useRef(0);
+  const importProgressRef = useRef<HTMLInputElement | null>(null);
 
   const keyRoot = ROOTS[keyRootIndex];
   const filteredProgressions = useMemo(() => PROGRESSIONS.filter((progression) => progression.mode === mode && progression.difficulty === difficulty), [mode, difficulty]);
@@ -509,16 +608,79 @@ export default function Home() {
     return count;
   }, [history.days]);
 
+  const currentLearningLevel = Math.min(5, Math.max(1, learningProfile.currentLevel));
+  const currentLevelUnits = useMemo(() => unitsForLevel(currentLearningLevel), [currentLearningLevel]);
+  const plannedUnitIds = useMemo(() => currentLevelUnits.map((unit) => unit.id), [currentLevelUnits]);
+  const todayLearningSession = dailySessions[todayKey];
+  const learningUnitIds = todayLearningSession?.unitIds?.length ? todayLearningSession.unitIds : plannedUnitIds;
+  const selectedRouteUnit = currentLevelUnits.find((unit) => unit.pillar === routePillar) ?? currentLevelUnits[0] ?? CURRICULUM[0];
+  const currentLearningUnit = learningSessionActive
+    ? (CURRICULUM.find((unit) => unit.id === learningUnitIds[Math.min(learningSessionIndex, learningUnitIds.length - 1)]) ?? selectedRouteUnit)
+    : selectedRouteUnit;
+  const activeRoutePillar = currentLearningUnit.pillar;
+  const routeProgression = PROGRESSIONS.find((item) => item.id === (mode === "menor" ? MINOR_LEVEL_PROGRESSION_IDS[currentLearningLevel] : LEVEL_PROGRESSION_IDS[currentLearningLevel])) ?? PROGRESSIONS[0];
+  const routeProgressionChords = useMemo(() => {
+    const resolved = routeProgression.steps.map((step) => ({ step, ...resolveProgressionStep(keyRoot, step) }));
+    return currentLearningLevel === 3 ? withClosestVoicings(resolved) : resolved;
+  }, [keyRoot, routeProgression.steps, currentLearningLevel]);
+  const currentRouteApplication = routeProgressionChords[Math.min(routeApplicationStep, routeProgressionChords.length - 1)];
+  const rhythmPattern = RHYTHM_PATTERNS[currentLearningLevel] ?? RHYTHM_PATTERNS[1];
+  const routeTargetSequence = useMemo(() => {
+    if (activeRoutePillar === "Lectura") return READING_MIDI;
+    if (activeRoutePillar === "Ritmo") return Array(rhythmPattern.offsets.length).fill(60 + keyRoot.pc);
+    if (activeRoutePillar === "Técnica") return (SCALE_PATTERNS[currentLearningLevel] ?? SCALE_PATTERNS[1]).map((note) => note + keyRoot.pc);
+    return [];
+  }, [activeRoutePillar, currentLearningLevel, keyRoot.pc, rhythmPattern.offsets.length]);
+  const earChoices = EAR_CHORDS_BY_LEVEL[currentLearningLevel] ?? EAR_CHORDS_BY_LEVEL[1];
+  const earChord = CHORDS.find((chord) => chord.id === earChoices[new Date().getDate() % earChoices.length]) ?? CHORDS[0];
+  const earRootPc = keyRoot.pc;
+  const earTargetNotes = earChord.intervals.map((interval) => 48 + earRootPc + interval);
+  const improvScaleNotes = scaleIntervals.map((interval) => 60 + keyRoot.pc + interval);
+  const routeTargetPitchClasses = activeRoutePillar === "Oído"
+    ? [...new Set(earTargetNotes.map((note) => mod(note)))].sort((a, b) => a - b)
+    : activeRoutePillar === "Aplicación" && currentLearningLevel < 4
+      ? [...new Set(currentRouteApplication.chord.intervals.map((interval) => mod(currentRouteApplication.pc + interval)))].sort((a, b) => a - b)
+      : [];
+  const routeChordCorrect = activeRoutePillar === "Aplicación" && currentLearningLevel === 3
+    ? sameSet([...activeNotes].sort((a, b) => a - b), [...currentRouteApplication.notes].sort((a, b) => a - b))
+    : routeTargetPitchClasses.length > 0 && sameSet(activePitchClasses, routeTargetPitchClasses);
+  const routeKeyboardTargets = activeRoutePillar === "Oído"
+    ? earTargetNotes
+    : activeRoutePillar === "Aplicación"
+      ? (currentLearningLevel >= 4 ? improvScaleNotes : currentRouteApplication.notes)
+      : routeTargetSequence;
+  const routeObservedMax = Math.max(midiRange.max, ...routeKeyboardTargets, ...activeNotes);
+  const routeObservedMin = Math.min(midiRange.min, ...routeKeyboardTargets, ...activeNotes);
+  const routeKeyboardStart = routeObservedMax > 84
+    ? Math.max(12, Math.ceil((routeObservedMax - 48) / 12) * 12)
+    : routeObservedMin < 36
+      ? Math.max(12, Math.floor(routeObservedMin / 12) * 12)
+      : 36;
+  const routeSequenceScore = sequenceAccuracy(routePlayed, routeTargetSequence, activeRoutePillar === "Lectura");
+  const learningCompletedToday = todayLearningSession?.completedUnitIds?.length ?? 0;
+  const learningProgressPercent = Math.round((learningCompletedToday / Math.max(1, learningUnitIds.length)) * 100);
+  const masteredUnits = Object.values(mastery).filter((item) => item.status === "dominado").length;
+  const dueReviews = Object.values(mastery).filter((item) => item.nextReview && item.nextReview <= todayKey && item.status !== "dominado").length;
+  const learningDays = Object.values(dailySessions).filter((session) => session.completed).length;
+  const pillarScores = useMemo(() => PILLARS.map((pillar) => {
+    const units = CURRICULUM.filter((unit) => unit.pillar === pillar.name);
+    const values = units.map((unit) => mastery[unit.id]?.bestAccuracy ?? 0).filter(Boolean);
+    return { ...pillar, score: Math.round(average(values)), mastered: units.filter((unit) => mastery[unit.id]?.status === "dominado").length };
+  }), [mastery]);
+
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const currentRaw = localStorage.getItem(LEARNING_STORAGE_KEY);
+      const raw = currentRaw ?? localStorage.getItem(STORAGE_KEY);
+      const migratingLegacy = !currentRaw && Boolean(raw);
       if (raw) {
         const saved = JSON.parse(raw) as {
-          settings?: { view?: "practica" | "progresiones" | "teoria"; keyRootIndex?: number; rootIndex?: number; mode?: "mayor" | "menor"; difficulty?: Difficulty; progressionId?: string; tempo?: number; dailyGoal?: number; audioOn?: boolean; soundVariant?: SoundVariant };
+          settings?: { view?: "ruta" | "practica" | "progresiones" | "teoria"; keyRootIndex?: number; rootIndex?: number; mode?: "mayor" | "menor"; difficulty?: Difficulty; progressionId?: string; tempo?: number; dailyGoal?: number; audioOn?: boolean; soundVariant?: SoundVariant };
           history?: PracticeHistory;
+          learning?: { profile?: PracticeProfile; mastery?: Record<string, SkillMastery>; attempts?: AttemptResult[]; dailySessions?: Record<string, DailySession> };
         };
         const settings = saved.settings;
-        if (settings?.view) setView(settings.view);
+        if (settings?.view && !migratingLegacy) setView(settings.view);
         if (typeof settings?.keyRootIndex === "number" && ROOTS[settings.keyRootIndex]) setKeyRootIndex(settings.keyRootIndex);
         if (typeof settings?.rootIndex === "number" && ROOTS[settings.rootIndex]) setRootIndex(settings.rootIndex);
         if (settings?.mode === "mayor" || settings?.mode === "menor") setMode(settings.mode);
@@ -529,6 +691,10 @@ export default function Home() {
         if (typeof settings?.audioOn === "boolean") setAudioOn(settings.audioOn);
         if (settings?.soundVariant && ["piano", "electrico", "organo"].includes(settings.soundVariant)) setSoundVariant(settings.soundVariant);
         if (saved.history?.days && saved.history?.learned) setHistory(saved.history);
+        if (saved.learning?.profile) setLearningProfile({ ...EMPTY_PROFILE, ...saved.learning.profile, currentLevel: Math.min(5, Math.max(1, saved.learning.profile.currentLevel ?? 1)) });
+        if (saved.learning?.mastery) setMastery(saved.learning.mastery);
+        if (Array.isArray(saved.learning?.attempts)) setAttempts(saved.learning.attempts.slice(-400));
+        if (saved.learning?.dailySessions) setDailySessions(saved.learning.dailySessions);
       }
     } catch {
       setHistory(EMPTY_HISTORY);
@@ -539,12 +705,150 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      version: 2,
+    localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify({
+      version: 3,
       settings: { view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, soundVariant },
       history,
+      learning: { profile: learningProfile, mastery, attempts: attempts.slice(-400), dailySessions },
     }));
-  }, [hydrated, view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, soundVariant, history]);
+  }, [hydrated, view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, soundVariant, history, learningProfile, mastery, attempts, dailySessions]);
+
+  const finishRouteAttempt = useCallback((passed: boolean, metrics?: Partial<AttemptResult>) => {
+    if (routeAttemptDone) return;
+    const dateKey = localDateKey();
+    const pitchAccuracy = metrics?.pitchAccuracy ?? (routeTargetSequence.length ? sequenceAccuracy(routePlayed, routeTargetSequence, activeRoutePillar === "Lectura") : passed ? 100 : 0);
+    const velocityTarget = learningProfile.velocityCalibration?.medium;
+    const velocityAccuracy = metrics?.velocityAccuracy ?? (velocityTarget && routeVelocities.length ? Math.max(0, Math.round(100 - Math.abs(average(routeVelocities) - velocityTarget) * 2)) : 100);
+    const result: AttemptResult = {
+      id: `${Date.now()}-${currentLearningUnit.id}`,
+      unitId: currentLearningUnit.id,
+      date: dateKey,
+      pitchAccuracy,
+      timingAccuracy: metrics?.timingAccuracy ?? 100,
+      velocityAccuracy,
+      pedalAccuracy: metrics?.pedalAccuracy ?? (sustainDown ? 100 : 0),
+      tempo: metrics?.tempo ?? currentLearningUnit.tempo,
+      usedHelp: routeUsedHelp,
+      passed,
+    };
+    setAttempts((previous) => [...previous.slice(-399), result]);
+    setMastery((previous) => {
+      const old = previous[currentLearningUnit.id];
+      const passedDates = passed ? [...new Set([...(old?.passedDates ?? []), dateKey])] : (old?.passedDates ?? []);
+      const passes = (old?.passes ?? 0) + (passed ? 1 : 0);
+      const status: SkillMastery["status"] = passedDates.length >= 2 ? "dominado" : passes >= 2 ? "aprobado" : (old?.status === "aprobado" ? "aprobado" : "en_progreso");
+      return {
+        ...previous,
+        [currentLearningUnit.id]: {
+          unitId: currentLearningUnit.id,
+          status,
+          passes,
+          attempts: (old?.attempts ?? 0) + 1,
+          bestAccuracy: Math.max(old?.bestAccuracy ?? 0, Math.round(average([pitchAccuracy, result.timingAccuracy, velocityAccuracy]))),
+          bestTempo: Math.max(old?.bestTempo ?? 0, result.tempo),
+          lastPracticed: dateKey,
+          passedDates,
+          nextReview: addDays(dateKey, passed ? (status === "dominado" ? 14 : 3) : 1),
+        },
+      };
+    });
+    setRoutePassed(passed);
+    setRouteAttemptDone(true);
+    setRouteFeedback(passed ? "¡Bloque superado! Quedó guardado en tu ruta." : "Buen intento. Revisa la guía y vuelve a probar.");
+    if (passed) {
+      setDailySessions((previous) => {
+        const session = previous[dateKey] ?? { date: dateKey, minutes: learningProfile.sessionMinutes, unitIds: plannedUnitIds, completedUnitIds: [], completed: false };
+        const completedUnitIds = [...new Set([...session.completedUnitIds, currentLearningUnit.id])];
+        return { ...previous, [dateKey]: { ...session, completedUnitIds, completed: session.unitIds.every((id) => completedUnitIds.includes(id)) } };
+      });
+    }
+  }, [routeAttemptDone, routeTargetSequence, routePlayed, activeRoutePillar, learningProfile.velocityCalibration, learningProfile.sessionMinutes, routeVelocities, currentLearningUnit, sustainDown, routeUsedHelp, plannedUnitIds]);
+
+  const resetRouteAttempt = useCallback(() => {
+    setRoutePlayed([]);
+    setRouteVelocities([]);
+    setRhythmEvents([]);
+    setRouteApplicationStep(0);
+    setRoutePassed(false);
+    setRouteAttemptDone(false);
+    setRouteUsedHelp(false);
+    setRouteFeedback("Escucha la cuenta, mira el objetivo y toca cuando estés listo.");
+  }, []);
+
+  const startLearningSession = useCallback(() => {
+    const dateKey = localDateKey();
+    setDailySessions((previous) => ({
+      ...previous,
+      [dateKey]: previous[dateKey] ?? { date: dateKey, minutes: learningProfile.sessionMinutes, unitIds: plannedUnitIds, completedUnitIds: [], completed: false },
+    }));
+    const completed = dailySessions[dateKey]?.completedUnitIds ?? [];
+    const firstPending = plannedUnitIds.findIndex((id) => !completed.includes(id));
+    setLearningSessionIndex(firstPending >= 0 ? firstPending : 0);
+    setLearningSessionActive(true);
+    resetRouteAttempt();
+  }, [dailySessions, learningProfile.sessionMinutes, plannedUnitIds, resetRouteAttempt]);
+
+  const advanceLearningSession = useCallback(() => {
+    const completed = dailySessions[localDateKey()]?.completedUnitIds ?? [];
+    const nextIndex = learningUnitIds.findIndex((id, index) => index > learningSessionIndex && !completed.includes(id));
+    if (nextIndex >= 0) {
+      setLearningSessionIndex(nextIndex);
+      resetRouteAttempt();
+    } else {
+      setLearningSessionActive(false);
+      setRouteFeedback("Sesión terminada. Mañana mezclaremos estos conceptos de otra forma.");
+    }
+  }, [dailySessions, learningSessionIndex, learningUnitIds, resetRouteAttempt]);
+
+  useEffect(() => {
+    resetRouteAttempt();
+  }, [currentLearningUnit.id, keyRoot.pc, resetRouteAttempt]);
+
+  useEffect(() => {
+    if (diagnosticStep >= 0 || routeAttemptDone || activeRoutePillar === "Ritmo" || !routeTargetSequence.length || routePlayed.length < routeTargetSequence.length) return;
+    const score = sequenceAccuracy(routePlayed, routeTargetSequence, activeRoutePillar === "Lectura");
+    finishRouteAttempt(score === 100, { pitchAccuracy: score });
+  }, [diagnosticStep, routeAttemptDone, activeRoutePillar, routeTargetSequence, routePlayed, finishRouteAttempt]);
+
+  useEffect(() => {
+    if (diagnosticStep >= 0 || routeAttemptDone || activeRoutePillar !== "Aplicación" || currentLearningLevel < 4 || routePlayed.length < 12) return;
+    const scalePcs = new Set(scaleIntervals.map((interval) => mod(keyRoot.pc + interval)));
+    const inScale = routePlayed.slice(0, 12).filter((note) => scalePcs.has(mod(note))).length;
+    const distinct = new Set(routePlayed.slice(0, 12).map((note) => mod(note))).size;
+    const pitchAccuracy = Math.round((inScale / 12) * 100);
+    finishRouteAttempt(pitchAccuracy >= 80 && distinct >= 4, { pitchAccuracy, timingAccuracy: 100, tempo: currentLearningUnit.tempo });
+  }, [diagnosticStep, routeAttemptDone, activeRoutePillar, currentLearningLevel, routePlayed, scaleIntervals, keyRoot.pc, currentLearningUnit.tempo, finishRouteAttempt]);
+
+  useEffect(() => {
+    if (view !== "ruta" || routeAttemptDone || !routeChordCorrect) return;
+    if (activeRoutePillar === "Oído") finishRouteAttempt(true, { pitchAccuracy: 100 });
+    if (activeRoutePillar === "Aplicación") {
+      if (routeApplicationStep >= routeProgressionChords.length - 1) finishRouteAttempt(true, { pitchAccuracy: 100 });
+      else setRouteApplicationStep((step) => step + 1);
+    }
+  }, [view, routeAttemptDone, routeChordCorrect, activeRoutePillar, routeApplicationStep, routeProgressionChords.length, finishRouteAttempt]);
+
+  useEffect(() => {
+    if (diagnosticStep !== 1 || !sameSet(activePitchClasses, [0, 4, 7])) return;
+    setDiagnosticStep(2);
+    setRoutePlayed([]);
+    setRouteFeedback("Muy bien. Último paso: toca Do mayor ascendente, de Do a Do.");
+  }, [diagnosticStep, activePitchClasses]);
+
+  useEffect(() => {
+    const ready = currentLevelUnits.every((unit) => ["aprobado", "dominado"].includes(mastery[unit.id]?.status ?? ""));
+    if (ready && currentLearningLevel < 5) setLearningProfile((profile) => ({ ...profile, currentLevel: profile.currentLevel + 1 }));
+  }, [currentLevelUnits, mastery, currentLearningLevel]);
+
+  useEffect(() => {
+    if (!rhythmRunning || rhythmEvents.length < rhythmPattern.offsets.length) return;
+    const beatMs = 60000 / currentLearningUnit.tempo;
+    const timingErrors = rhythmEvents.slice(0, rhythmPattern.offsets.length).map((event, index) => Math.abs(event.at - (rhythmStartRef.current + rhythmPattern.offsets[index] * beatMs)) / beatMs);
+    const timingAccuracy = Math.max(0, Math.round(100 - average(timingErrors) * 140));
+    const pitchAccuracy = Math.round((rhythmEvents.slice(0, rhythmPattern.offsets.length).filter((event) => mod(event.note) === keyRoot.pc).length / rhythmPattern.offsets.length) * 100);
+    setRhythmRunning(false);
+    finishRouteAttempt(timingAccuracy >= 68 && pitchAccuracy === 100, { timingAccuracy, pitchAccuracy, tempo: currentLearningUnit.tempo });
+  }, [rhythmRunning, rhythmEvents, rhythmPattern.offsets, currentLearningUnit.tempo, keyRoot.pc, finishRouteAttempt]);
 
   useEffect(() => {
     const compatible = PROGRESSIONS.find((item) => item.id === progressionId && item.mode === mode && item.difficulty === difficulty);
@@ -712,12 +1016,188 @@ export default function Home() {
     demoTimersRef.current.push(finishTimer);
   }, [cancelProgressionPlayback, ensureAudio, keyRoot, selectedProgression.steps, soundOff, soundOn, tempo]);
 
+  const auditionRouteExercise = useCallback(() => {
+    cancelProgressionPlayback();
+    audioOnRef.current = true;
+    setAudioOn(true);
+    ensureAudio();
+    const sequential = activeRoutePillar === "Técnica" || activeRoutePillar === "Lectura";
+    const notes = activeRoutePillar === "Oído" ? earTargetNotes : activeRoutePillar === "Aplicación" ? currentRouteApplication.notes : routeTargetSequence;
+    if (sequential) {
+      notes.forEach((note, index) => {
+        const start = window.setTimeout(() => { demoVoicesRef.current.add(note); soundOn(note, 72); }, index * 230);
+        const stop = window.setTimeout(() => { soundOff(note); demoVoicesRef.current.delete(note); }, index * 230 + 180);
+        demoTimersRef.current.push(start, stop);
+      });
+    } else {
+      notes.forEach((note) => { demoVoicesRef.current.add(note); soundOn(note, 72); });
+      const stop = window.setTimeout(() => notes.forEach((note) => { soundOff(note); demoVoicesRef.current.delete(note); }), 1000);
+      demoTimersRef.current.push(stop);
+    }
+  }, [cancelProgressionPlayback, ensureAudio, activeRoutePillar, earTargetNotes, currentRouteApplication.notes, routeTargetSequence, soundOn, soundOff]);
+
+  const playRouteProgression = useCallback(() => {
+    cancelProgressionPlayback();
+    audioOnRef.current = true;
+    setAudioOn(true);
+    ensureAudio();
+    const beatMs = 60000 / currentLearningUnit.tempo;
+    routeProgressionChords.forEach(({ notes }, index) => {
+      const start = window.setTimeout(() => {
+        setDemoStep(index);
+        notes.forEach((note) => { demoVoicesRef.current.add(note); soundOn(note, 68); });
+      }, index * beatMs);
+      const stop = window.setTimeout(() => notes.forEach((note) => { soundOff(note); demoVoicesRef.current.delete(note); }), index * beatMs + beatMs * .76);
+      demoTimersRef.current.push(start, stop);
+    });
+    const finish = window.setTimeout(() => setDemoStep(null), routeProgressionChords.length * beatMs);
+    demoTimersRef.current.push(finish);
+  }, [cancelProgressionPlayback, ensureAudio, currentLearningUnit.tempo, routeProgressionChords, soundOn, soundOff]);
+
+  const playMetronomeClick = useCallback((accent = false) => {
+    const context = ensureAudio();
+    if (!context) return;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = accent ? 1260 : 880;
+    gain.gain.setValueAtTime(0.07, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.055);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.06);
+  }, [ensureAudio]);
+
+  const startRhythmTrainer = useCallback(() => {
+    rhythmTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    rhythmTimersRef.current = [];
+    resetRouteAttempt();
+    setRhythmEvents([]);
+    setRhythmRunning(false);
+    const beatMs = 60000 / currentLearningUnit.tempo;
+    Array.from({ length: 4 }, (_, index) => {
+      const timer = window.setTimeout(() => {
+        setRhythmCountdown(4 - index);
+        playMetronomeClick(index === 0);
+      }, index * beatMs);
+      rhythmTimersRef.current.push(timer);
+    });
+    const start = window.setTimeout(() => {
+      setRhythmCountdown(null);
+      rhythmStartRef.current = performance.now();
+      setRhythmRunning(true);
+      playMetronomeClick(true);
+    }, 4 * beatMs);
+    rhythmTimersRef.current.push(start);
+    for (let index = 1; index < 4; index += 1) {
+      const click = window.setTimeout(() => playMetronomeClick(false), (4 + index) * beatMs);
+      rhythmTimersRef.current.push(click);
+    }
+    setRouteFeedback(`Cuenta cuatro pulsos. Después toca la tónica con el patrón ${rhythmPattern.label}.`);
+  }, [currentLearningUnit.tempo, playMetronomeClick, resetRouteAttempt, rhythmPattern.label]);
+
+  const startDiagnostic = useCallback(() => {
+    resetRouteAttempt();
+    setDiagnosticStep(0);
+    setRouteFeedback("Paso 1 de 3: encuentra y toca Do central (C4).");
+  }, [resetRouteAttempt]);
+
+  const skipDiagnostic = useCallback(() => {
+    setDiagnosticStep(-1);
+    setLearningProfile((profile) => ({ ...profile, diagnosticComplete: true, currentLevel: Math.max(1, profile.currentLevel) }));
+  }, []);
+
+  const exportProgress = useCallback(() => {
+    const raw = localStorage.getItem(LEARNING_STORAGE_KEY);
+    if (!raw) return;
+    const blob = new Blob([raw], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `acorde-progreso-${localDateKey()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const importProgress = useCallback(async (file: File) => {
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as { version?: number; learning?: unknown };
+      if (parsed.version !== 3 || !parsed.learning) throw new Error("Formato inválido");
+      localStorage.setItem(LEARNING_STORAGE_KEY, raw);
+      window.location.reload();
+    } catch {
+      setRouteFeedback("Ese archivo no corresponde a una copia válida de ACORDE 3.");
+    }
+  }, []);
+
+  const registerRouteNote = useCallback((note: number, velocity: number) => {
+    setMidiRange((range) => ({ min: Math.min(range.min, note), max: Math.max(range.max, note) }));
+    if (calibrationStage !== "idle") {
+      if (calibrationStage === "soft") {
+        setCalibrationSamples([velocity]);
+        setCalibrationStage("medium");
+        setRouteFeedback("Ahora toca una nota con intensidad media.");
+      } else if (calibrationStage === "medium") {
+        setCalibrationSamples((samples) => [...samples, velocity]);
+        setCalibrationStage("loud");
+        setRouteFeedback("Por último, toca una nota fuerte pero cómoda.");
+      } else {
+        const [soft = 35, medium = 75] = calibrationSamples;
+        setLearningProfile((profile) => ({ ...profile, velocityCalibration: { soft, medium, loud: velocity } }));
+        setCalibrationStage("idle");
+        setCalibrationSamples([]);
+        setRouteFeedback("Curva de dinámica calibrada para tu Q49.");
+      }
+      return;
+    }
+    if (diagnosticStep === 0) {
+      if (note === 60) {
+        setDiagnosticStep(1);
+        setRouteFeedback("Paso 2 de 3: toca el acorde Do mayor en cualquier inversión.");
+      } else setRouteFeedback("Busca Do central: está inmediatamente a la izquierda del grupo de dos teclas negras más cercano al centro.");
+      return;
+    }
+    if (diagnosticStep === 2) {
+      const expected = [0, 2, 4, 5, 7, 9, 11, 0];
+      setRoutePlayed((previous) => {
+        if (mod(note) !== expected[previous.length]) {
+          setRouteFeedback("La secuencia se desvió. Vuelve a comenzar desde Do.");
+          return [];
+        }
+        const next = [...previous, note];
+        if (next.length === expected.length) {
+          setDiagnosticStep(3);
+          setLearningProfile((profile) => ({ ...profile, diagnosticComplete: true, currentLevel: Math.max(3, profile.currentLevel) }));
+          setRouteFeedback("Diagnóstico completo: comenzaremos en Fluidez. Puedes cambiar el nivel cuando quieras.");
+        }
+        return next;
+      });
+      return;
+    }
+    if (view !== "ruta" || routeAttemptDone) return;
+    if (activeRoutePillar === "Ritmo" && rhythmRunning) {
+      setRhythmEvents((events) => [...events, { note, at: performance.now(), velocity }].slice(0, rhythmPattern.offsets.length));
+      return;
+    }
+    if (activeRoutePillar === "Técnica" || activeRoutePillar === "Lectura") {
+      setRoutePlayed((played) => [...played, note]);
+      setRouteVelocities((velocities) => [...velocities, velocity]);
+    }
+    if (activeRoutePillar === "Aplicación" && currentLearningLevel >= 4) {
+      setRoutePlayed((played) => [...played, note].slice(0, 12));
+      setRouteVelocities((velocities) => [...velocities, velocity].slice(0, 12));
+    }
+  }, [calibrationStage, calibrationSamples, diagnosticStep, view, routeAttemptDone, activeRoutePillar, rhythmRunning, rhythmPattern.offsets.length, currentLearningLevel]);
+
   const pressNote = useCallback((note: number, velocity = 90) => {
     sustainedRef.current.delete(note);
     setLastVelocity(velocity);
     setActiveNotes((previous) => new Set(previous).add(note));
+    registerRouteNote(note, velocity);
     soundOn(note, velocity);
-  }, [soundOn]);
+  }, [registerRouteNote, soundOn]);
 
   const releaseNote = useCallback((note: number) => {
     if (sustainOnRef.current) {
@@ -735,6 +1215,7 @@ export default function Home() {
     if (command === 0x80 || (command === 0x90 && velocity === 0)) releaseNote(note);
     if (command === 0xb0 && note === 64) {
       sustainOnRef.current = velocity >= 64;
+      setSustainDown(velocity >= 64);
       if (velocity < 64) {
         const sustained = [...sustainedRef.current];
         sustainedRef.current.clear();
@@ -775,6 +1256,7 @@ export default function Home() {
   useEffect(() => () => {
     midiAccessRef.current?.inputs.forEach((input) => { input.onmidimessage = null; });
     demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    rhythmTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     if (progressionAdvanceTimerRef.current) window.clearTimeout(progressionAdvanceTimerRef.current);
     voicesRef.current.forEach(({ oscillators }) => oscillators.forEach((oscillator) => oscillator.stop()));
     void audioContextRef.current?.close();
@@ -818,10 +1300,11 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => setView("practica")} aria-label="Ir a práctica">
+        <button className="brand" onClick={() => setView("ruta")} aria-label="Ir a la ruta de aprendizaje">
           <span className="brand-mark">A</span><span>ACORDE</span>
         </button>
         <nav className="main-nav" aria-label="Secciones">
+          <button className={view === "ruta" ? "active" : ""} onClick={() => setView("ruta")}>Ruta</button>
           <button className={view === "practica" ? "active" : ""} onClick={() => setView("practica")}>Práctica</button>
           <button className={view === "progresiones" ? "active" : ""} onClick={() => setView("progresiones")}>Progresiones</button>
           <button className={view === "teoria" ? "active" : ""} onClick={() => setView("teoria")}>Teoría</button>
@@ -856,15 +1339,111 @@ export default function Home() {
       </section>
 
       <section className="context-bar">
-        <div className="context-title"><p className="eyebrow">CENTRO DE PRÁCTICA</p><h1>{view === "practica" ? "Del concepto al teclado." : view === "progresiones" ? "Aprende a moverte entre acordes." : "Entiende lo que estás tocando."}</h1></div>
+        <div className="context-title"><p className="eyebrow">CENTRO DE PRÁCTICA</p><h1>{view === "ruta" ? "Tu próxima habilidad empieza aquí." : view === "practica" ? "Del concepto al teclado." : view === "progresiones" ? "Aprende a moverte entre acordes." : "Entiende lo que estás tocando."}</h1></div>
         <div className="tonality-controls">
           <label><span>TONALIDAD</span><select value={keyRootIndex} onChange={(event) => changeTonality(Number(event.target.value))}>{ROOTS.map((option, index) => <option key={option.name} value={index}>{option.name}</option>)}</select></label>
           <div className="mode-toggle" aria-label="Modo de la tonalidad"><button className={mode === "mayor" ? "active" : ""} onClick={() => setMode("mayor")}>Mayor</button><button className={mode === "menor" ? "active" : ""} onClick={() => setMode("menor")}>Menor</button></div>
         </div>
-        <div className="session-stats"><div><b>{view === "progresiones" ? todayData.rounds : correctCount}</b><span>{view === "progresiones" ? "VUELTAS HOY" : "ACORDES"}</span></div><div><b>{view === "progresiones" ? practiceStreak : streak}</b><span>{view === "progresiones" ? "DÍAS" : "RACHA"}</span></div></div>
+        <div className="session-stats"><div><b>{view === "ruta" ? `${learningProgressPercent}%` : view === "progresiones" ? todayData.rounds : correctCount}</b><span>{view === "ruta" ? "SESIÓN HOY" : view === "progresiones" ? "VUELTAS HOY" : "ACORDES"}</span></div><div><b>{view === "ruta" ? currentLearningLevel : view === "progresiones" ? practiceStreak : streak}</b><span>{view === "ruta" ? "NIVEL" : view === "progresiones" ? "DÍAS" : "RACHA"}</span></div></div>
       </section>
 
-      {view === "practica" ? (
+      {view === "ruta" ? (
+        <section className="route-page">
+          <section className="route-hero">
+            <div>
+              <p className="eyebrow coral">ACORDE 3 · PIANO MODERNO</p>
+              <h2>Una sesión corta.<br />Cinco habilidades conectadas.</h2>
+              <p>La ruta mezcla técnica, ritmo, oído, lectura y aplicación. Cada bloque que completas ajusta lo que volverá a aparecer.</p>
+              <div className="session-length" aria-label="Duración de la sesión">
+                {([10, 20, 30] as const).map((minutes) => <button className={learningProfile.sessionMinutes === minutes ? "active" : ""} key={minutes} onClick={() => setLearningProfile((profile) => ({ ...profile, sessionMinutes: minutes }))}>{minutes}<small>min</small></button>)}
+              </div>
+              <button className="route-primary" onClick={startLearningSession}>{todayLearningSession?.completed ? "Repasar la ruta de hoy" : todayLearningSession ? "Continuar sesión" : "Comenzar sesión de hoy"} →</button>
+            </div>
+            <div className="route-overview">
+              <div className="route-progress-ring" style={{ "--route-progress": `${learningProgressPercent * 3.6}deg` } as React.CSSProperties}><span><strong>{learningCompletedToday}</strong><small>de {learningUnitIds.length}</small></span></div>
+              <div><span>HOY · {learningProfile.sessionMinutes} MIN</span><strong>{todayLearningSession?.completed ? "Sesión completa" : `${learningUnitIds.length - learningCompletedToday} bloques pendientes`}</strong><p>{dueReviews ? `${dueReviews} repaso${dueReviews === 1 ? "" : "s"} prioritario${dueReviews === 1 ? "" : "s"}.` : "Sin repasos atrasados."}</p></div>
+            </div>
+            {!learningProfile.diagnosticComplete && (
+              <div className="diagnostic-card">
+                <span>DIAGNÓSTICO OPCIONAL · 2 MIN</span><strong>Empieza en el punto correcto.</strong><p>Tres pruebas MIDI: Do central, una tríada y una escala.</p>
+                <div><button onClick={startDiagnostic}>Hacer diagnóstico</button><button onClick={skipDiagnostic}>Empezar desde cero</button></div>
+              </div>
+            )}
+          </section>
+
+          <div className="route-layout">
+            <aside className="route-sidebar">
+              <p className="eyebrow">MAPA DE APRENDIZAJE</p>
+              <h3>Cinco etapas, una misma música.</h3>
+              <div className="level-map">
+                {LEVELS.map((item) => {
+                  const levelUnits = unitsForLevel(item.level);
+                  const complete = levelUnits.filter((unit) => ["aprobado", "dominado"].includes(mastery[unit.id]?.status ?? "")).length;
+                  return <button className={currentLearningLevel === item.level ? "active" : ""} key={item.level} onClick={() => { setLearningSessionActive(false); setLearningProfile((profile) => ({ ...profile, currentLevel: item.level })); setRoutePillar("Técnica"); }}><span>0{item.level}</span><div><strong>{item.name}</strong><small>{item.caption}</small><i>{complete}/{levelUnits.length}</i></div></button>;
+                })}
+              </div>
+              <div className="route-data-tools">
+                <span>PROGRESO LOCAL</span><p>{learningDays} días completos · {masteredUnits} habilidades dominadas</p>
+                <div><button onClick={exportProgress}>Exportar</button><button onClick={() => importProgressRef.current?.click()}>Importar</button></div>
+                <input ref={importProgressRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importProgress(file); }} />
+              </div>
+            </aside>
+
+            <div className="route-content">
+              <div className="daily-blocks" aria-label="Bloques de la sesión">
+                {learningUnitIds.map((unitId, index) => {
+                  const unit = CURRICULUM.find((item) => item.id === unitId) ?? CURRICULUM[0];
+                  const checked = todayLearningSession?.completedUnitIds?.includes(unit.id);
+                  const current = learningSessionActive && index === learningSessionIndex;
+                  return <button className={`${checked ? "checked" : ""} ${current ? "current" : ""}`} key={unit.id} onClick={() => { setLearningSessionActive(true); setLearningSessionIndex(index); resetRouteAttempt(); }}><span>{checked ? "✓" : String(index + 1).padStart(2, "0")}</span><strong>{unit.pillar}</strong><small>{unit.title}</small></button>;
+                })}
+              </div>
+
+              <section className="route-trainer">
+                <div className="route-trainer-head">
+                  <div><span className="pillar-badge">{PILLARS.find((item) => item.name === activeRoutePillar)?.symbol}</span><div><p className="eyebrow coral">NIVEL {currentLearningLevel} · {activeRoutePillar.toUpperCase()}</p><h2>{diagnosticStep >= 0 ? "Diagnóstico MIDI" : currentLearningUnit.title}</h2><p>{diagnosticStep >= 0 ? "Una comprobación breve para ajustar el punto de partida." : currentLearningUnit.summary}</p></div></div>
+                  <div className="trainer-metrics"><span>{currentLearningUnit.tempo}<small>BPM</small></span><span>{mastery[currentLearningUnit.id]?.bestAccuracy ?? 0}%<small>MEJOR</small></span><span className={sustainDown ? "pedal-on" : ""}>{sustainDown ? "ON" : "OFF"}<small>PEDAL</small></span></div>
+                </div>
+
+                {diagnosticStep >= 0 ? (
+                  <div className="diagnostic-stage">
+                    <div className="diagnostic-steps">{[0, 1, 2].map((step) => <i className={diagnosticStep > step ? "done" : diagnosticStep === step ? "active" : ""} key={step}>{diagnosticStep > step ? "✓" : step + 1}</i>)}</div>
+                    <strong>{diagnosticStep === 0 ? "Toca Do central (C4)" : diagnosticStep === 1 ? "Construye Do mayor" : diagnosticStep === 2 ? "Toca la escala de Do ascendente" : "Diagnóstico completo"}</strong>
+                    <p>{routeFeedback}</p>
+                    {diagnosticStep === 3 && <button onClick={() => { setDiagnosticStep(-1); startLearningSession(); }}>Abrir mi ruta →</button>}
+                  </div>
+                ) : (
+                  <>
+                    <div className="exercise-stage">
+                      <div className="exercise-copy"><span>OBJETIVO</span><strong>{currentLearningUnit.objective}</strong><p>{currentLearningUnit.fingering ?? "La app mide notas, tiempo, velocidad y pedal; la postura y los dedos se muestran como guía."}</p></div>
+                      {activeRoutePillar === "Técnica" && <div className="sequence-rail">{routeTargetSequence.map((note, index) => <i className={routePlayed[index] !== undefined ? (mod(routePlayed[index]) === mod(note) ? "played" : "wrong") : ""} key={`${note}-${index}`}>{NOTE_NAMES[mod(note)]}</i>)}</div>}
+                      {activeRoutePillar === "Ritmo" && <div className="rhythm-stage"><div className={rhythmRunning ? "pulse-orbit active" : "pulse-orbit"}>{rhythmCountdown ?? (rhythmRunning ? `${rhythmEvents.length}/${rhythmPattern.offsets.length}` : "♪")}</div><div><strong>{rhythmPattern.label} · {currentLearningUnit.tempo} BPM</strong><p>Toca {keyRoot.name} siguiendo el patrón después de la cuenta de cuatro.</p><button onClick={startRhythmTrainer}>{rhythmRunning || rhythmCountdown ? "Contando…" : "Iniciar metrónomo"}</button></div></div>}
+                      {activeRoutePillar === "Oído" && <div className="ear-stage"><span>?</span><div><strong>Escucha y reconstruye el acorde</strong><p>Encuentra la raíz y completa el color sin mirar la respuesta.</p><button onClick={auditionRouteExercise}>▶ Escuchar</button><button onClick={() => { setRouteUsedHelp(true); setRouteFeedback(`Ayuda: toca ${spellChord(keyRoot.name, earChord).join(" · ")}.`); }}>Mostrar pista</button></div></div>}
+                      {activeRoutePillar === "Lectura" && <div className="reading-stage">{currentLearningLevel >= 2 && <div className="lead-sheet-chords">{routeProgressionChords.slice(0, 4).map(({ name, chord }, index) => <span key={`${name}-${index}`}>{name}{chord.suffix || ""}</span>)}</div>}<MusicStaff notes={READING_NOTES} title="Frase de lectura" /><div className="reading-progress">{routePlayed.map((note, index) => <span className={note === READING_MIDI[index] ? "correct" : "wrong"} key={`${note}-${index}`}>{midiLabel(note)}</span>)}</div></div>}
+                      {activeRoutePillar === "Aplicación" && <div className="application-stage"><div className="application-steps">{routeProgressionChords.map(({ step, name, chord }, index) => <div className={currentLearningLevel >= 4 ? (demoStep === index ? "sounding" : "") : index < routeApplicationStep ? "done" : index === routeApplicationStep ? "active" : ""} key={`${step.numeral}-${index}`}><span>{currentLearningLevel < 4 && index < routeApplicationStep ? "✓" : step.numeral}</span><strong>{name}{chord.suffix}</strong><small>{step.function}</small></div>)}</div>{currentLearningLevel >= 4 ? <><p>Escucha la vuelta e improvisa 12 notas. Busca al menos cuatro alturas distintas y aterriza dentro de la escala de {keyRoot.name} {mode}.</p><button onClick={playRouteProgression}>▶ Escuchar vuelta · {routePlayed.length}/12 notas</button></> : <><p>{currentLearningLevel === 3 ? "Modo voicing: se evalúan las notas y el registro exacto para entrenar conducción de voces." : "Puedes completar cada acorde en cualquier inversión u octava."}</p><button onClick={auditionRouteExercise}>♪ Escuchar acorde actual</button></>}</div>}
+                    </div>
+
+                    <div className="keyboard-heading"><div><span className="keyboard-dot" /> <strong>{midiState === "connected" ? deviceName : "Teclado de la ruta"}</strong><small>Ventana MIDI {midiLabel(routeKeyboardStart)}–{midiLabel(routeKeyboardStart + 48)} · sigue los botones de octava</small></div><div className="legend"><span><i className="target" /> Objetivo</span><span><i className="played" /> Tocando</span><span><i className="wrong" /> Fuera</span></div></div>
+                    <PianoKeyboard targetNotes={routeKeyboardTargets} activeNotes={activeNotes} noteNames={new Map(routeKeyboardTargets.map((note) => [mod(note), NOTE_NAMES[mod(note)]]))} onDown={pressNote} onUp={releaseNote} rangeStart={routeKeyboardStart} />
+
+                    <div className={`route-feedback ${routeAttemptDone ? routePassed ? "success" : "warning" : ""}`}><span>{routeAttemptDone ? routePassed ? "✓" : "↗" : "●"}</span><div><strong>{routeFeedback}</strong><small>{routeSequenceScore && !routeAttemptDone ? `${routeSequenceScore}% de la secuencia coincide.` : learningProfile.velocityCalibration ? `Dinámica calibrada: ${learningProfile.velocityCalibration.soft}/${learningProfile.velocityCalibration.medium}/${learningProfile.velocityCalibration.loud}.` : "Puedes calibrar la dinámica para adaptar la respuesta a tu toque."}</small></div><div>{routeAttemptDone && <button onClick={routePassed && learningSessionActive ? advanceLearningSession : resetRouteAttempt}>{routePassed && learningSessionActive ? "Siguiente bloque →" : "Reintentar"}</button>}</div></div>
+                  </>
+                )}
+              </section>
+
+              <section className="free-labs">
+                <div><p className="eyebrow">PRÁCTICA LIBRE</p><h3>Entrena una habilidad sin salir de tu ruta.</h3></div>
+                <div>{pillarScores.map((pillar) => <button className={routePillar === pillar.name && !learningSessionActive ? "active" : ""} key={pillar.name} onClick={() => { setLearningSessionActive(false); setRoutePillar(pillar.name); resetRouteAttempt(); }}><span>{pillar.symbol}</span><strong>{pillar.name}</strong><small>{pillar.score}% precisión · {pillar.mastered}/5 dominadas</small></button>)}</div>
+              </section>
+
+              <section className="expression-card">
+                <div><p className="eyebrow coral">EXPRESIÓN · Q49</p><h3>Haz que la velocidad signifique algo.</h3><p>Calibra tres intensidades para que los ejercicios de dinámica se adapten a tu teclado y a tu toque.</p></div>
+                <div className="velocity-calibration"><span className={calibrationStage !== "idle" ? "active" : ""}>{calibrationStage === "idle" ? "LISTO" : calibrationStage.toUpperCase()}</span><button onClick={() => { setCalibrationSamples([]); setCalibrationStage("soft"); setRouteFeedback("Toca una nota muy suave, pero que responda con claridad."); }}>Calibrar dinámica</button></div>
+              </section>
+            </div>
+          </div>
+        </section>
+      ) : view === "practica" ? (
         <>
           <section className="diatonic-section">
             <div className="section-heading"><div><span className="section-number">01</span><div><p className="eyebrow">FAMILIA DE LA TONALIDAD</p><h2>Acordes diatónicos de {keyRoot.name} {mode}</h2></div></div><p>Construidos solo con notas de la escala: <strong>{scaleNames.join(" · ")}</strong></p></div>
@@ -1007,7 +1586,7 @@ export default function Home() {
         </section>
       )}
 
-      <footer><span>ACORDE · Laboratorio armónico</span><p>Web MIDI funciona mejor en Chrome o Edge de escritorio.</p><button onClick={() => setShowMidiHelp(true)}>Ayuda MIDI</button></footer>
+      <footer><span>ACORDE 3 · Ruta de piano moderno</span><p>Tu aprendizaje se guarda localmente. Web MIDI funciona mejor en Chrome o Edge.</p><button onClick={() => setShowMidiHelp(true)}>Ayuda MIDI</button></footer>
 
       {showMidiHelp && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowMidiHelp(false)}>
