@@ -80,6 +80,7 @@ const THEORY_LESSONS = [
 ];
 
 type Difficulty = "Inicial" | "Intermedio" | "Avanzado";
+type SoundVariant = "piano" | "electrico" | "organo";
 
 type ProgressionStep = {
   numeral: string;
@@ -417,6 +418,7 @@ export default function Home() {
   const [midiState, setMidiState] = useState<"idle" | "connecting" | "connected" | "waiting" | "unsupported" | "error">("idle");
   const [deviceName, setDeviceName] = useState("Alesis Q49 / teclado MIDI");
   const [audioOn, setAudioOn] = useState(true);
+  const [soundVariant, setSoundVariant] = useState<SoundVariant>("piano");
   const [correctCount, setCorrectCount] = useState(0);
   const [streak, setStreak] = useState(0);
   const [lesson, setLesson] = useState(0);
@@ -438,8 +440,9 @@ export default function Home() {
   const sustainedRef = useRef(new Set<number>());
   const sustainOnRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const voicesRef = useRef(new Map<number, { oscillator: OscillatorNode; gain: GainNode }>());
+  const voicesRef = useRef(new Map<number, { oscillators: OscillatorNode[]; gain: GainNode; release: number }>());
   const audioOnRef = useRef(audioOn);
+  const soundVariantRef = useRef<SoundVariant>(soundVariant);
   const solvedRef = useRef(false);
   const progressionSolvedRef = useRef(false);
   const progressionAdvanceTimerRef = useRef<number | null>(null);
@@ -511,7 +514,7 @@ export default function Home() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as {
-          settings?: { view?: "practica" | "progresiones" | "teoria"; keyRootIndex?: number; rootIndex?: number; mode?: "mayor" | "menor"; difficulty?: Difficulty; progressionId?: string; tempo?: number; dailyGoal?: number; audioOn?: boolean };
+          settings?: { view?: "practica" | "progresiones" | "teoria"; keyRootIndex?: number; rootIndex?: number; mode?: "mayor" | "menor"; difficulty?: Difficulty; progressionId?: string; tempo?: number; dailyGoal?: number; audioOn?: boolean; soundVariant?: SoundVariant };
           history?: PracticeHistory;
         };
         const settings = saved.settings;
@@ -524,6 +527,7 @@ export default function Home() {
         if (typeof settings?.tempo === "number") setTempo(Math.min(140, Math.max(50, settings.tempo)));
         if (typeof settings?.dailyGoal === "number") setDailyGoal(Math.min(8, Math.max(1, settings.dailyGoal)));
         if (typeof settings?.audioOn === "boolean") setAudioOn(settings.audioOn);
+        if (settings?.soundVariant && ["piano", "electrico", "organo"].includes(settings.soundVariant)) setSoundVariant(settings.soundVariant);
         if (saved.history?.days && saved.history?.learned) setHistory(saved.history);
       }
     } catch {
@@ -537,10 +541,10 @@ export default function Home() {
     if (!hydrated) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       version: 2,
-      settings: { view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn },
+      settings: { view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, soundVariant },
       history,
     }));
-  }, [hydrated, view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, history]);
+  }, [hydrated, view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, soundVariant, history]);
 
   useEffect(() => {
     const compatible = PROGRESSIONS.find((item) => item.id === progressionId && item.mode === mode && item.difficulty === difficulty);
@@ -556,6 +560,7 @@ export default function Home() {
   }, [selectedProgression.id, selectedProgression.steps.length]);
 
   useEffect(() => { audioOnRef.current = audioOn; }, [audioOn]);
+  useEffect(() => { soundVariantRef.current = soundVariant; }, [soundVariant]);
   useEffect(() => { setInversion(0); solvedRef.current = false; }, [selectedChordId, rootIndex, progressionStep, view]);
   useEffect(() => {
     if (isCorrect && !solvedRef.current) {
@@ -621,15 +626,29 @@ export default function Home() {
     if (!audioOnRef.current || voicesRef.current.has(note)) return;
     const context = ensureAudio();
     if (!context) return;
-    const oscillator = context.createOscillator();
     const gain = context.createGain();
-    oscillator.type = "triangle";
-    oscillator.frequency.value = 440 * 2 ** ((note - 69) / 12);
+    const frequency = 440 * 2 ** ((note - 69) / 12);
+    const variant = soundVariantRef.current;
+    const oscillatorSpecs: Array<{ type: OscillatorType; ratio: number; detune?: number }> = variant === "electrico"
+      ? [{ type: "sine", ratio: 1 }, { type: "triangle", ratio: 2, detune: 4 }]
+      : variant === "organo"
+        ? [{ type: "sine", ratio: 1 }, { type: "sine", ratio: 2 }, { type: "square", ratio: .5, detune: -3 }]
+        : [{ type: "triangle", ratio: 1 }];
+    const oscillators = oscillatorSpecs.map((spec) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = spec.type;
+      oscillator.frequency.value = frequency * spec.ratio;
+      oscillator.detune.value = spec.detune ?? 0;
+      oscillator.connect(gain);
+      oscillator.start();
+      return oscillator;
+    });
+    const peak = variant === "piano" ? Math.max(0.018, velocity / 1270) : variant === "electrico" ? Math.max(0.012, velocity / 2450) : Math.max(0.009, velocity / 3200);
     gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.018, velocity / 1270), context.currentTime + 0.018);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    voicesRef.current.set(note, { oscillator, gain });
+    gain.gain.exponentialRampToValueAtTime(peak, context.currentTime + (variant === "organo" ? 0.045 : 0.018));
+    if (variant === "electrico") gain.gain.exponentialRampToValueAtTime(peak * .68, context.currentTime + .55);
+    gain.connect(context.destination);
+    voicesRef.current.set(note, { oscillators, gain, release: variant === "organo" ? .24 : variant === "electrico" ? .32 : .14 });
   }, [ensureAudio]);
 
   const soundOff = useCallback((note: number) => {
@@ -638,8 +657,8 @@ export default function Home() {
     if (!voice || !context) return;
     voice.gain.gain.cancelScheduledValues(context.currentTime);
     voice.gain.gain.setValueAtTime(Math.max(voice.gain.gain.value, 0.0001), context.currentTime);
-    voice.gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.14);
-    voice.oscillator.stop(context.currentTime + 0.16);
+    voice.gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + voice.release);
+    voice.oscillators.forEach((oscillator) => oscillator.stop(context.currentTime + voice.release + .02));
     voicesRef.current.delete(note);
   }, []);
 
@@ -757,7 +776,7 @@ export default function Home() {
     midiAccessRef.current?.inputs.forEach((input) => { input.onmidimessage = null; });
     demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     if (progressionAdvanceTimerRef.current) window.clearTimeout(progressionAdvanceTimerRef.current);
-    voicesRef.current.forEach(({ oscillator }) => oscillator.stop());
+    voicesRef.current.forEach(({ oscillators }) => oscillators.forEach((oscillator) => oscillator.stop()));
     void audioContextRef.current?.close();
   }, []);
 
@@ -811,6 +830,14 @@ export default function Home() {
           <button className={`sound-toggle ${audioOn ? "on" : ""}`} onClick={() => setAudioOn((value) => !value)} aria-pressed={audioOn}>
             <span>{audioOn ? "◖))" : "◖×"}</span> Sonido
           </button>
+          <label className="sound-variant">
+            <span>TIMBRE</span>
+            <select value={soundVariant} onChange={(event) => { const variant = event.target.value as SoundVariant; soundVariantRef.current = variant; audioOnRef.current = true; setSoundVariant(variant); setAudioOn(true); }} aria-label="Seleccionar timbre de sonido">
+              <option value="piano">Piano cálido</option>
+              <option value="electrico">Piano eléctrico</option>
+              <option value="organo">Órgano</option>
+            </select>
+          </label>
           <button className={`midi-button ${midiState}`} onClick={connectMidi}>
             <span className="midi-dot" />
             {midiState === "connected" ? deviceName : midiState === "connecting" ? "Conectando…" : midiState === "waiting" ? "Esperando MIDI" : "Conectar MIDI"}
