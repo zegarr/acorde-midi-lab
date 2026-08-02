@@ -79,6 +79,107 @@ const THEORY_LESSONS = [
   { n: "06", title: "En cualquier escala", kicker: "El método transferible", summary: "Aplica fórmulas, no memorices dibujos." },
 ];
 
+type Difficulty = "Inicial" | "Intermedio" | "Avanzado";
+
+type ProgressionStep = {
+  numeral: string;
+  degree: number;
+  offset: number;
+  chordId: string;
+  function: string;
+};
+
+type ProgressionDefinition = {
+  id: string;
+  name: string;
+  style: string;
+  mode: "mayor" | "menor";
+  difficulty: Difficulty;
+  description: string;
+  steps: ProgressionStep[];
+};
+
+type PracticeDay = {
+  rounds: number;
+  chords: number;
+  progressions: Record<string, number>;
+};
+
+type PracticeHistory = {
+  totalRounds: number;
+  totalChords: number;
+  learned: Record<string, { hits: number; lastPracticed: string }>;
+  days: Record<string, PracticeDay>;
+};
+
+const PROGRESSIONS: ProgressionDefinition[] = [
+  { id: "pilares", name: "Los tres pilares", style: "Folk · rock · blues", mode: "mayor", difficulty: "Inicial", description: "Tónica, subdominante y dominante: la gramática armónica más directa.", steps: [
+    { numeral: "I", degree: 1, offset: 0, chordId: "major", function: "Tónica" }, { numeral: "IV", degree: 4, offset: 5, chordId: "major", function: "Subdominante" }, { numeral: "V", degree: 5, offset: 7, chordId: "major", function: "Dominante" }, { numeral: "I", degree: 1, offset: 0, chordId: "major", function: "Resolución" },
+  ] },
+  { id: "pop", name: "Pop universal", style: "Pop · indie · electrónica", mode: "mayor", difficulty: "Inicial", description: "Una de las vueltas más reconocibles: estable, direccional y emotiva.", steps: [
+    { numeral: "I", degree: 1, offset: 0, chordId: "major", function: "Tónica" }, { numeral: "V", degree: 5, offset: 7, chordId: "major", function: "Impulso" }, { numeral: "vi", degree: 6, offset: 9, chordId: "minor", function: "Relativa menor" }, { numeral: "IV", degree: 4, offset: 5, chordId: "major", function: "Apertura" },
+  ] },
+  { id: "doo-wop", name: "Vuelta de los 50", style: "Doo-wop · balada · soul", mode: "mayor", difficulty: "Inicial", description: "Una cadencia clásica que conecta la tónica con su relativa menor.", steps: [
+    { numeral: "I", degree: 1, offset: 0, chordId: "major", function: "Tónica" }, { numeral: "vi", degree: 6, offset: 9, chordId: "minor", function: "Relativa" }, { numeral: "IV", degree: 4, offset: 5, chordId: "major", function: "Subdominante" }, { numeral: "V", degree: 5, offset: 7, chordId: "major", function: "Dominante" },
+  ] },
+  { id: "menor-clasica", name: "Cadencia menor", style: "Clásica · cine · canción", mode: "menor", difficulty: "Inicial", description: "La dominante mayor eleva el séptimo grado y conduce con fuerza hacia la tónica menor.", steps: [
+    { numeral: "i", degree: 1, offset: 0, chordId: "minor", function: "Tónica menor" }, { numeral: "iv", degree: 4, offset: 5, chordId: "minor", function: "Subdominante" }, { numeral: "V", degree: 5, offset: 7, chordId: "major", function: "Dominante" }, { numeral: "i", degree: 1, offset: 0, chordId: "minor", function: "Resolución" },
+  ] },
+  { id: "epica-menor", name: "Épica menor", style: "Cine · rock · videojuegos", mode: "menor", difficulty: "Inicial", description: "Una vuelta descendente que explora los acordes mayores de la escala menor natural.", steps: [
+    { numeral: "i", degree: 1, offset: 0, chordId: "minor", function: "Tónica" }, { numeral: "VI", degree: 6, offset: 8, chordId: "major", function: "Color" }, { numeral: "III", degree: 3, offset: 3, chordId: "major", function: "Relativa mayor" }, { numeral: "VII", degree: 7, offset: 10, chordId: "major", function: "Retorno" },
+  ] },
+  { id: "andalus-simple", name: "Descenso andaluz", style: "Flamenco · rock · cine", mode: "menor", difficulty: "Inicial", description: "Bajo descendente y dominante final: una tensión muy fácil de reconocer.", steps: [
+    { numeral: "i", degree: 1, offset: 0, chordId: "minor", function: "Tónica" }, { numeral: "VII", degree: 7, offset: 10, chordId: "major", function: "Descenso" }, { numeral: "VI", degree: 6, offset: 8, chordId: "major", function: "Descenso" }, { numeral: "V", degree: 5, offset: 7, chordId: "major", function: "Dominante" },
+  ] },
+  { id: "dos-cinco-uno", name: "ii–V–I", style: "Jazz · bossa · standards", mode: "mayor", difficulty: "Intermedio", description: "Preparación, tensión y resolución. La célula funcional más importante del jazz.", steps: [
+    { numeral: "ii7", degree: 2, offset: 2, chordId: "minor7", function: "Preparación" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Tensión" }, { numeral: "Imaj7", degree: 1, offset: 0, chordId: "major7", function: "Resolución" },
+  ] },
+  { id: "turnaround", name: "Turnaround clásico", style: "Jazz · soul · gospel", mode: "mayor", difficulty: "Intermedio", description: "Una rueda funcional que siempre vuelve a empezar con naturalidad.", steps: [
+    { numeral: "Imaj7", degree: 1, offset: 0, chordId: "major7", function: "Tónica" }, { numeral: "vi7", degree: 6, offset: 9, chordId: "minor7", function: "Prolongación" }, { numeral: "ii7", degree: 2, offset: 2, chordId: "minor7", function: "Preparación" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Dominante" },
+  ] },
+  { id: "dominante-secundaria", name: "Dominante secundaria", style: "Pop · gospel · jazz", mode: "mayor", difficulty: "Intermedio", description: "V/vi convierte momentáneamente al sexto grado en un centro de llegada.", steps: [
+    { numeral: "Imaj7", degree: 1, offset: 0, chordId: "major7", function: "Tónica" }, { numeral: "V7/vi", degree: 3, offset: 4, chordId: "dominant7", function: "Dominante secundaria" }, { numeral: "vi7", degree: 6, offset: 9, chordId: "minor7", function: "Tónica temporal" }, { numeral: "IVmaj7", degree: 4, offset: 5, chordId: "major7", function: "Apertura" },
+  ] },
+  { id: "dos-cinco-menor", name: "iiø–V–i", style: "Jazz menor · tango · cine", mode: "menor", difficulty: "Intermedio", description: "El semidisminuido prepara al dominante y la sensible conduce a la tónica menor.", steps: [
+    { numeral: "iiø7", degree: 2, offset: 2, chordId: "half-diminished", function: "Preparación" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Tensión" }, { numeral: "i(mMaj7)", degree: 1, offset: 0, chordId: "minor-major7", function: "Resolución" },
+  ] },
+  { id: "menor-septimas", name: "Órbita menor", style: "Neo-soul · R&B", mode: "menor", difficulty: "Intermedio", description: "Séptimas suaves alrededor del centro menor con una dominante clara al final.", steps: [
+    { numeral: "i7", degree: 1, offset: 0, chordId: "minor7", function: "Tónica" }, { numeral: "iv7", degree: 4, offset: 5, chordId: "minor7", function: "Subdominante" }, { numeral: "VImaj7", degree: 6, offset: 8, chordId: "major7", function: "Color" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Dominante" },
+  ] },
+  { id: "tres-seis-dos-cinco", name: "Cadena de dominantes", style: "Bebop · gospel · jazz", mode: "mayor", difficulty: "Avanzado", description: "El círculo de quintas encadena funciones hasta aterrizar en la tónica.", steps: [
+    { numeral: "iii7", degree: 3, offset: 4, chordId: "minor7", function: "Inicio" }, { numeral: "VI7", degree: 6, offset: 9, chordId: "dominant7", function: "Dominante de ii" }, { numeral: "ii7", degree: 2, offset: 2, chordId: "minor7", function: "Preparación" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Dominante" }, { numeral: "Imaj9", degree: 1, offset: 0, chordId: "major9", function: "Resolución" },
+  ] },
+  { id: "ciclo-completo", name: "Ciclo armónico", style: "Jazz moderno · reharmonización", mode: "mayor", difficulty: "Avanzado", description: "Una ruta larga con semidisminuido y dominantes encadenadas por quintas.", steps: [
+    { numeral: "Imaj7", degree: 1, offset: 0, chordId: "major7", function: "Tónica" }, { numeral: "♯ivø7", degree: 4, offset: 6, chordId: "half-diminished", function: "Enlace cromático" }, { numeral: "VII7", degree: 7, offset: 11, chordId: "dominant7", function: "Dominante de iii" }, { numeral: "iii7", degree: 3, offset: 4, chordId: "minor7", function: "Centro relativo" }, { numeral: "VI7", degree: 6, offset: 9, chordId: "dominant7", function: "Dominante de ii" }, { numeral: "ii7", degree: 2, offset: 2, chordId: "minor7", function: "Preparación" }, { numeral: "V7", degree: 5, offset: 7, chordId: "dominant7", function: "Tensión" }, { numeral: "Imaj7", degree: 1, offset: 0, chordId: "major7", function: "Resolución" },
+  ] },
+  { id: "colores-altos", name: "Colores extendidos", style: "Neo-soul · fusión", mode: "mayor", difficulty: "Avanzado", description: "Novena y trecena muestran cómo la función se conserva aunque el voicing sea más rico.", steps: [
+    { numeral: "Imaj9", degree: 1, offset: 0, chordId: "major9", function: "Tónica" }, { numeral: "VI7♭9", degree: 6, offset: 9, chordId: "dominant-flat9", function: "Dominante de ii" }, { numeral: "ii9", degree: 2, offset: 2, chordId: "minor9", function: "Preparación" }, { numeral: "V13", degree: 5, offset: 7, chordId: "thirteenth", function: "Dominante extendida" },
+  ] },
+  { id: "menor-extendida", name: "Cadencia menor extendida", style: "Jazz contemporáneo · cine", mode: "menor", difficulty: "Avanzado", description: "La cadencia menor completa con novenas, alteración dominante y resolución dramática.", steps: [
+    { numeral: "iiø7", degree: 2, offset: 2, chordId: "half-diminished", function: "Preparación" }, { numeral: "V7♭9", degree: 5, offset: 7, chordId: "dominant-flat9", function: "Máxima tensión" }, { numeral: "i(mMaj7)", degree: 1, offset: 0, chordId: "minor-major7", function: "Resolución" },
+  ] },
+  { id: "andalus-extendida", name: "Andaluza extendida", style: "Flamenco-jazz · fusión", mode: "menor", difficulty: "Avanzado", description: "El descenso tradicional vestido con extensiones y una dominante alterada.", steps: [
+    { numeral: "im9", degree: 1, offset: 0, chordId: "minor9", function: "Tónica" }, { numeral: "VII13", degree: 7, offset: 10, chordId: "thirteenth", function: "Descenso" }, { numeral: "VImaj9", degree: 6, offset: 8, chordId: "major9", function: "Color" }, { numeral: "V7♭9", degree: 5, offset: 7, chordId: "dominant-flat9", function: "Dominante" },
+  ] },
+];
+
+const EMPTY_HISTORY: PracticeHistory = { totalRounds: 0, totalChords: 0, learned: {}, days: {} };
+const STORAGE_KEY = "acorde-practice-v2";
+
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveProgressionStep(keyRoot: { name: string; pc: number }, step: ProgressionStep) {
+  const pc = mod(keyRoot.pc + step.offset);
+  const name = spellFromDegree(keyRoot.name, step.degree, pc);
+  const chord = CHORDS.find((item) => item.id === step.chordId) ?? CHORDS[0];
+  return { pc, name, chord, notes: chord.intervals.map((interval) => 48 + pc + interval) };
+}
+
 function mod(value: number, size = 12) {
   return ((value % size) + size) % size;
 }
@@ -304,7 +405,8 @@ function TheoryLesson({ lesson, rootName, chord, spelledNotes, mode }: {
 }
 
 export default function Home() {
-  const [view, setView] = useState<"practica" | "teoria">("practica");
+  const [view, setView] = useState<"practica" | "progresiones" | "teoria">("practica");
+  const [keyRootIndex, setKeyRootIndex] = useState(0);
   const [rootIndex, setRootIndex] = useState(0);
   const [mode, setMode] = useState<"mayor" | "menor">("mayor");
   const [selectedChordId, setSelectedChordId] = useState("major7");
@@ -319,6 +421,18 @@ export default function Home() {
   const [streak, setStreak] = useState(0);
   const [lesson, setLesson] = useState(0);
   const [showMidiHelp, setShowMidiHelp] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>("Inicial");
+  const [progressionId, setProgressionId] = useState("pilares");
+  const [progressionStep, setProgressionStep] = useState(0);
+  const [roundChecks, setRoundChecks] = useState<boolean[]>([false, false, false, false]);
+  const [roundComplete, setRoundComplete] = useState(false);
+  const [progressionSessionActive, setProgressionSessionActive] = useState(false);
+  const [tempo, setTempo] = useState(78);
+  const [dailyGoal, setDailyGoal] = useState(3);
+  const [history, setHistory] = useState<PracticeHistory>(EMPTY_HISTORY);
+  const [hydrated, setHydrated] = useState(false);
+  const [demoStep, setDemoStep] = useState<number | null>(null);
+  const [isPlayingProgression, setIsPlayingProgression] = useState(false);
 
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
   const sustainedRef = useRef(new Set<number>());
@@ -327,12 +441,24 @@ export default function Home() {
   const voicesRef = useRef(new Map<number, { oscillator: OscillatorNode; gain: GainNode }>());
   const audioOnRef = useRef(audioOn);
   const solvedRef = useRef(false);
+  const progressionSolvedRef = useRef(false);
+  const progressionAdvanceTimerRef = useRef<number | null>(null);
+  const demoTimersRef = useRef<number[]>([]);
+  const demoVoicesRef = useRef(new Set<number>());
 
-  const root = ROOTS[rootIndex];
-  const selectedChord = CHORDS.find((chord) => chord.id === selectedChordId) ?? CHORDS[0];
+  const keyRoot = ROOTS[keyRootIndex];
+  const filteredProgressions = useMemo(() => PROGRESSIONS.filter((progression) => progression.mode === mode && progression.difficulty === difficulty), [mode, difficulty]);
+  const selectedProgression = PROGRESSIONS.find((progression) => progression.id === progressionId) ?? filteredProgressions[0] ?? PROGRESSIONS[0];
+  const currentProgressionStep = selectedProgression.steps[Math.min(progressionStep, selectedProgression.steps.length - 1)];
+  const progressionRootPc = mod(keyRoot.pc + currentProgressionStep.offset);
+  const progressionRootName = spellFromDegree(keyRoot.name, currentProgressionStep.degree, progressionRootPc);
+  const root = view === "progresiones" ? { name: progressionRootName, pc: progressionRootPc } : ROOTS[rootIndex];
+  const selectedChord = view === "progresiones"
+    ? (CHORDS.find((chord) => chord.id === currentProgressionStep.chordId) ?? CHORDS[0])
+    : (CHORDS.find((chord) => chord.id === selectedChordId) ?? CHORDS[0]);
   const spelledNotes = useMemo(() => spellChord(root.name, selectedChord), [root.name, selectedChord]);
   const scaleIntervals = mode === "mayor" ? MAJOR_SCALE : MINOR_SCALE;
-  const scaleNames = useMemo(() => spellScale(root.name, scaleIntervals), [root.name, scaleIntervals]);
+  const scaleNames = useMemo(() => spellScale(keyRoot.name, scaleIntervals), [keyRoot.name, scaleIntervals]);
 
   const targetNotes = useMemo(() => {
     const raw = selectedChord.intervals.map((interval) => 36 + root.pc + interval);
@@ -359,16 +485,130 @@ export default function Home() {
     return scaleNames.map((note, index) => ({ note, degree: degrees[index], chord: CHORDS.find((item) => item.id === qualities[index]) ?? CHORDS[0] }));
   }, [mode, scaleNames]);
 
+  const todayKey = localDateKey();
+  const todayData = history.days[todayKey] ?? { rounds: 0, chords: 0, progressions: {} };
+  const todayProgressionRounds = todayData.progressions[selectedProgression.id] ?? 0;
+  const learnedCount = Object.keys(history.learned).length;
+  const progressionChords = useMemo(() => selectedProgression.steps.map((step) => ({ step, ...resolveProgressionStep(keyRoot, step) })), [keyRoot, selectedProgression.steps]);
+  const lastSevenDays = useMemo(() => Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    const key = localDateKey(date);
+    return { key, label: date.toLocaleDateString("es-UY", { weekday: "short" }).slice(0, 2), rounds: history.days[key]?.rounds ?? 0 };
+  }), [history.days]);
+  const practiceStreak = useMemo(() => {
+    let count = 0;
+    const cursor = new Date();
+    while (history.days[localDateKey(cursor)]?.rounds) {
+      count += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return count;
+  }, [history.days]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          settings?: { view?: "practica" | "progresiones" | "teoria"; keyRootIndex?: number; rootIndex?: number; mode?: "mayor" | "menor"; difficulty?: Difficulty; progressionId?: string; tempo?: number; dailyGoal?: number; audioOn?: boolean };
+          history?: PracticeHistory;
+        };
+        const settings = saved.settings;
+        if (settings?.view) setView(settings.view);
+        if (typeof settings?.keyRootIndex === "number" && ROOTS[settings.keyRootIndex]) setKeyRootIndex(settings.keyRootIndex);
+        if (typeof settings?.rootIndex === "number" && ROOTS[settings.rootIndex]) setRootIndex(settings.rootIndex);
+        if (settings?.mode === "mayor" || settings?.mode === "menor") setMode(settings.mode);
+        if (settings?.difficulty && ["Inicial", "Intermedio", "Avanzado"].includes(settings.difficulty)) setDifficulty(settings.difficulty);
+        if (settings?.progressionId && PROGRESSIONS.some((item) => item.id === settings.progressionId)) setProgressionId(settings.progressionId);
+        if (typeof settings?.tempo === "number") setTempo(Math.min(140, Math.max(50, settings.tempo)));
+        if (typeof settings?.dailyGoal === "number") setDailyGoal(Math.min(8, Math.max(1, settings.dailyGoal)));
+        if (typeof settings?.audioOn === "boolean") setAudioOn(settings.audioOn);
+        if (saved.history?.days && saved.history?.learned) setHistory(saved.history);
+      }
+    } catch {
+      setHistory(EMPTY_HISTORY);
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: 2,
+      settings: { view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn },
+      history,
+    }));
+  }, [hydrated, view, keyRootIndex, rootIndex, mode, difficulty, progressionId, tempo, dailyGoal, audioOn, history]);
+
+  useEffect(() => {
+    const compatible = PROGRESSIONS.find((item) => item.id === progressionId && item.mode === mode && item.difficulty === difficulty);
+    if (!compatible && filteredProgressions[0]) setProgressionId(filteredProgressions[0].id);
+  }, [difficulty, mode, progressionId, filteredProgressions]);
+
+  useEffect(() => {
+    setProgressionStep(0);
+    setRoundChecks(Array(selectedProgression.steps.length).fill(false));
+    setRoundComplete(false);
+    setProgressionSessionActive(false);
+    progressionSolvedRef.current = false;
+  }, [selectedProgression.id, selectedProgression.steps.length]);
+
   useEffect(() => { audioOnRef.current = audioOn; }, [audioOn]);
-  useEffect(() => { setInversion(0); solvedRef.current = false; }, [selectedChordId, rootIndex]);
+  useEffect(() => { setInversion(0); solvedRef.current = false; }, [selectedChordId, rootIndex, progressionStep, view]);
   useEffect(() => {
     if (isCorrect && !solvedRef.current) {
       solvedRef.current = true;
       setCorrectCount((count) => count + 1);
       setStreak((count) => count + 1);
+      const chordKey = `${root.name}${selectedChord.suffix || "maj"}`;
+      const dateKey = localDateKey();
+      setHistory((previous) => {
+        const currentDay = previous.days[dateKey] ?? { rounds: 0, chords: 0, progressions: {} };
+        const learned = previous.learned[chordKey] ?? { hits: 0, lastPracticed: dateKey };
+        return {
+          ...previous,
+          totalChords: previous.totalChords + 1,
+          learned: { ...previous.learned, [chordKey]: { hits: learned.hits + 1, lastPracticed: dateKey } },
+          days: { ...previous.days, [dateKey]: { ...currentDay, chords: currentDay.chords + 1 } },
+        };
+      });
     }
     if (activeNotes.size === 0) solvedRef.current = false;
-  }, [isCorrect, activeNotes.size]);
+  }, [isCorrect, activeNotes.size, root.name, selectedChord.suffix]);
+
+  useEffect(() => {
+    if (view !== "progresiones" || !progressionSessionActive || roundComplete || !isCorrect || progressionSolvedRef.current) return;
+    progressionSolvedRef.current = true;
+    setRoundChecks((previous) => previous.map((checked, index) => index === progressionStep ? true : checked));
+    progressionAdvanceTimerRef.current = window.setTimeout(() => {
+      if (progressionStep >= selectedProgression.steps.length - 1) {
+        const dateKey = localDateKey();
+        setRoundComplete(true);
+        setProgressionSessionActive(false);
+        setHistory((previous) => {
+          const currentDay = previous.days[dateKey] ?? { rounds: 0, chords: 0, progressions: {} };
+          return {
+            ...previous,
+            totalRounds: previous.totalRounds + 1,
+            days: {
+              ...previous.days,
+              [dateKey]: {
+                ...currentDay,
+                rounds: currentDay.rounds + 1,
+                progressions: { ...currentDay.progressions, [selectedProgression.id]: (currentDay.progressions[selectedProgression.id] ?? 0) + 1 },
+              },
+            },
+          };
+        });
+      } else {
+        setProgressionStep((step) => step + 1);
+      }
+    }, 650);
+  }, [view, progressionSessionActive, roundComplete, isCorrect, progressionStep, selectedProgression.id, selectedProgression.steps.length]);
+
+  useEffect(() => { progressionSolvedRef.current = false; }, [progressionStep]);
 
   const ensureAudio = useCallback(() => {
     if (typeof window === "undefined") return null;
@@ -402,6 +642,56 @@ export default function Home() {
     voice.oscillator.stop(context.currentTime + 0.16);
     voicesRef.current.delete(note);
   }, []);
+
+  const cancelProgressionPlayback = useCallback(() => {
+    demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    demoTimersRef.current = [];
+    demoVoicesRef.current.forEach((note) => soundOff(note));
+    demoVoicesRef.current.clear();
+    setDemoStep(null);
+    setIsPlayingProgression(false);
+  }, [soundOff]);
+
+  const auditionProgressionStep = useCallback((index: number) => {
+    cancelProgressionPlayback();
+    audioOnRef.current = true;
+    setAudioOn(true);
+    ensureAudio();
+    const step = selectedProgression.steps[index];
+    const resolved = resolveProgressionStep(keyRoot, step);
+    setDemoStep(index);
+    resolved.notes.forEach((note) => { demoVoicesRef.current.add(note); soundOn(note, 76); });
+    const timer = window.setTimeout(() => {
+      resolved.notes.forEach((note) => { soundOff(note); demoVoicesRef.current.delete(note); });
+      setDemoStep(null);
+    }, 950);
+    demoTimersRef.current.push(timer);
+  }, [cancelProgressionPlayback, ensureAudio, keyRoot, selectedProgression.steps, soundOff, soundOn]);
+
+  const playProgression = useCallback(() => {
+    cancelProgressionPlayback();
+    audioOnRef.current = true;
+    setAudioOn(true);
+    ensureAudio();
+    setIsPlayingProgression(true);
+    const beatMs = 60000 / tempo;
+    selectedProgression.steps.forEach((step, index) => {
+      const resolved = resolveProgressionStep(keyRoot, step);
+      const startTimer = window.setTimeout(() => {
+        setDemoStep(index);
+        resolved.notes.forEach((note) => { demoVoicesRef.current.add(note); soundOn(note, 70); });
+      }, index * beatMs);
+      const stopTimer = window.setTimeout(() => {
+        resolved.notes.forEach((note) => { soundOff(note); demoVoicesRef.current.delete(note); });
+      }, index * beatMs + beatMs * 0.78);
+      demoTimersRef.current.push(startTimer, stopTimer);
+    });
+    const finishTimer = window.setTimeout(() => {
+      setDemoStep(null);
+      setIsPlayingProgression(false);
+    }, selectedProgression.steps.length * beatMs);
+    demoTimersRef.current.push(finishTimer);
+  }, [cancelProgressionPlayback, ensureAudio, keyRoot, selectedProgression.steps, soundOff, soundOn, tempo]);
 
   const pressNote = useCallback((note: number, velocity = 90) => {
     sustainedRef.current.delete(note);
@@ -465,6 +755,8 @@ export default function Home() {
 
   useEffect(() => () => {
     midiAccessRef.current?.inputs.forEach((input) => { input.onmidimessage = null; });
+    demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    if (progressionAdvanceTimerRef.current) window.clearTimeout(progressionAdvanceTimerRef.current);
     voicesRef.current.forEach(({ oscillator }) => oscillator.stop());
     void audioContextRef.current?.close();
   }, []);
@@ -474,6 +766,32 @@ export default function Home() {
     const optionIndex = ROOTS.findIndex((option) => option.pc === pc);
     if (optionIndex >= 0) setRootIndex(optionIndex);
     setSelectedChordId(chord.id);
+  };
+
+  const changeTonality = (index: number) => {
+    setKeyRootIndex(index);
+    setRootIndex(index);
+    setProgressionStep(0);
+    setRoundComplete(false);
+    setProgressionSessionActive(false);
+  };
+
+  const chooseProgression = (id: string) => {
+    cancelProgressionPlayback();
+    setProgressionId(id);
+    setProgressionStep(0);
+    setRoundComplete(false);
+    setProgressionSessionActive(false);
+  };
+
+  const startProgressionRound = () => {
+    cancelProgressionPlayback();
+    if (progressionAdvanceTimerRef.current) window.clearTimeout(progressionAdvanceTimerRef.current);
+    setProgressionStep(0);
+    setRoundChecks(Array(selectedProgression.steps.length).fill(false));
+    setRoundComplete(false);
+    setProgressionSessionActive(true);
+    progressionSolvedRef.current = false;
   };
 
   const feedbackLabel = !activeNotes.size ? "Listo para escucharte" : isCorrect ? "¡Acorde completo!" : extraPcs.length ? "Hay una nota fuera del acorde" : `Faltan ${missingPcs.length} ${missingPcs.length === 1 ? "nota" : "notas"}`;
@@ -486,6 +804,7 @@ export default function Home() {
         </button>
         <nav className="main-nav" aria-label="Secciones">
           <button className={view === "practica" ? "active" : ""} onClick={() => setView("practica")}>Práctica</button>
+          <button className={view === "progresiones" ? "active" : ""} onClick={() => setView("progresiones")}>Progresiones</button>
           <button className={view === "teoria" ? "active" : ""} onClick={() => setView("teoria")}>Teoría</button>
         </nav>
         <div className="header-actions">
@@ -510,18 +829,18 @@ export default function Home() {
       </section>
 
       <section className="context-bar">
-        <div className="context-title"><p className="eyebrow">CENTRO DE PRÁCTICA</p><h1>{view === "practica" ? "Del concepto al teclado." : "Entiende lo que estás tocando."}</h1></div>
+        <div className="context-title"><p className="eyebrow">CENTRO DE PRÁCTICA</p><h1>{view === "practica" ? "Del concepto al teclado." : view === "progresiones" ? "Aprende a moverte entre acordes." : "Entiende lo que estás tocando."}</h1></div>
         <div className="tonality-controls">
-          <label><span>TONALIDAD</span><select value={rootIndex} onChange={(event) => setRootIndex(Number(event.target.value))}>{ROOTS.map((option, index) => <option key={option.name} value={index}>{option.name}</option>)}</select></label>
+          <label><span>TONALIDAD</span><select value={keyRootIndex} onChange={(event) => changeTonality(Number(event.target.value))}>{ROOTS.map((option, index) => <option key={option.name} value={index}>{option.name}</option>)}</select></label>
           <div className="mode-toggle" aria-label="Modo de la tonalidad"><button className={mode === "mayor" ? "active" : ""} onClick={() => setMode("mayor")}>Mayor</button><button className={mode === "menor" ? "active" : ""} onClick={() => setMode("menor")}>Menor</button></div>
         </div>
-        <div className="session-stats"><div><b>{correctCount}</b><span>ACORDES</span></div><div><b>{streak}</b><span>RACHA</span></div></div>
+        <div className="session-stats"><div><b>{view === "progresiones" ? todayData.rounds : correctCount}</b><span>{view === "progresiones" ? "VUELTAS HOY" : "ACORDES"}</span></div><div><b>{view === "progresiones" ? practiceStreak : streak}</b><span>{view === "progresiones" ? "DÍAS" : "RACHA"}</span></div></div>
       </section>
 
       {view === "practica" ? (
         <>
           <section className="diatonic-section">
-            <div className="section-heading"><div><span className="section-number">01</span><div><p className="eyebrow">FAMILIA DE LA TONALIDAD</p><h2>Acordes diatónicos de {root.name} {mode}</h2></div></div><p>Construidos solo con notas de la escala: <strong>{scaleNames.join(" · ")}</strong></p></div>
+            <div className="section-heading"><div><span className="section-number">01</span><div><p className="eyebrow">FAMILIA DE LA TONALIDAD</p><h2>Acordes diatónicos de {keyRoot.name} {mode}</h2></div></div><p>Construidos solo con notas de la escala: <strong>{scaleNames.join(" · ")}</strong></p></div>
             <div className="degree-row">
               {diatonicChords.map(({ note, degree, chord }) => (
                 <button key={`${degree}-${note}`} onClick={() => chooseDiatonic(note, chord)} className={rootPcFromName(note) === root.pc && selectedChord.id === chord.id ? "active" : ""}>
@@ -568,6 +887,83 @@ export default function Home() {
             </section>
           </div>
         </>
+      ) : view === "progresiones" ? (
+        <section className="progressions-page">
+          <div className="progression-picker">
+            <div className="picker-intro">
+              <div><span className="section-number">01</span><div><p className="eyebrow">NIVEL DE LA SESIÓN</p><h2>Elige cuánto color quieres.</h2></div></div>
+              <p>La dificultad cambia tanto la longitud de la vuelta como el vocabulario: tríadas, séptimas o extensiones.</p>
+            </div>
+            <div className="difficulty-switch" aria-label="Dificultad de las progresiones">
+              {(["Inicial", "Intermedio", "Avanzado"] as Difficulty[]).map((level, index) => <button className={difficulty === level ? "active" : ""} key={level} onClick={() => setDifficulty(level)}><span>0{index + 1}</span><strong>{level}</strong><small>{index === 0 ? "Tríadas" : index === 1 ? "Séptimas" : "Extensiones"}</small></button>)}
+            </div>
+            <div className="progression-options">
+              {filteredProgressions.map((progression) => (
+                <button className={selectedProgression.id === progression.id ? "active" : ""} key={progression.id} onClick={() => chooseProgression(progression.id)}>
+                  <span className="progression-style">{progression.style}</span>
+                  <strong>{progression.name}</strong>
+                  <div>{progression.steps.map((step, index) => <span key={`${step.numeral}-${index}`}>{step.numeral}</span>)}</div>
+                  <small>{progression.description}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="progression-practice-grid">
+            <aside className="daily-panel">
+              <p className="eyebrow coral">PRÁCTICA DIARIA</p>
+              <h2>{todayProgressionRounds >= dailyGoal ? "Meta cumplida." : "Una vuelta a la vez."}</h2>
+              <p>Completa la progresión en orden. Cada acorde correcto recibe un check; la vuelta se guarda al completar el último.</p>
+              <div className="daily-goal">
+                <div><span>META DE HOY</span><div><button onClick={() => setDailyGoal((goal) => Math.max(1, goal - 1))}>−</button><strong>{dailyGoal}</strong><button onClick={() => setDailyGoal((goal) => Math.min(8, goal + 1))}>+</button></div></div>
+                <div className="goal-dots">{Array.from({ length: dailyGoal }, (_, index) => <i className={index < todayProgressionRounds ? "done" : ""} key={index}>{index < todayProgressionRounds ? "✓" : index + 1}</i>)}</div>
+                <small>{todayProgressionRounds} de {dailyGoal} vueltas de “{selectedProgression.name}”</small>
+              </div>
+              <div className="history-summary">
+                <div><strong>{history.totalRounds}</strong><span>VUELTAS TOTALES</span></div><div><strong>{learnedCount}</strong><span>ACORDES VISTOS</span></div><div><strong>{practiceStreak}</strong><span>DÍAS SEGUIDOS</span></div>
+              </div>
+              <div className="week-track"><span>ÚLTIMOS 7 DÍAS</span><div>{lastSevenDays.map((day) => <div key={day.key}><i className={day.rounds ? "practiced" : ""} style={{ opacity: day.rounds ? Math.min(1, .35 + day.rounds * .18) : 1 }}>{day.rounds || "·"}</i><small>{day.label}</small></div>)}</div></div>
+              <p className="storage-note"><span>⌁</span> Tu avance se guarda automáticamente en este dispositivo.</p>
+            </aside>
+
+            <section className="progression-trainer">
+              <div className="trainer-heading">
+                <div><p className="eyebrow coral">{difficulty.toUpperCase()} · {keyRoot.name} {mode.toUpperCase()}</p><h2>{selectedProgression.name}</h2><p>{selectedProgression.description}</p></div>
+                <div className="listen-controls">
+                  <button className={isPlayingProgression ? "playing" : ""} onClick={isPlayingProgression ? cancelProgressionPlayback : playProgression}>{isPlayingProgression ? "■ Detener" : "▶ Escuchar vuelta"}</button>
+                  <label><span>TEMPO · {tempo} BPM</span><input type="range" min="50" max="140" step="2" value={tempo} onChange={(event) => setTempo(Number(event.target.value))} /></label>
+                </div>
+              </div>
+
+              <div className="progression-track" style={{ gridTemplateColumns: `repeat(${selectedProgression.steps.length}, minmax(105px, 1fr))` }}>
+                {progressionChords.map(({ step, name, chord }, index) => (
+                  <div className={`${progressionStep === index && progressionSessionActive ? "current" : ""} ${roundChecks[index] ? "checked" : ""} ${demoStep === index ? "sounding" : ""}`} key={`${step.numeral}-${index}`}>
+                    <div className="step-top"><span>{String(index + 1).padStart(2, "0")}</span><i>{roundChecks[index] ? "✓" : progressionStep === index && progressionSessionActive ? "●" : "○"}</i></div>
+                    <small>{step.numeral}</small><strong>{name}<b>{chord.suffix}</b></strong><p>{step.function}</p>
+                    <button onClick={() => auditionProgressionStep(index)} aria-label={`Escuchar ${name}${chord.suffix}`}>♪</button>
+                  </div>
+                ))}
+              </div>
+
+              {roundComplete ? (
+                <div className="round-complete">
+                  <span>✓</span><div><small>VUELTA COMPLETA</small><strong>La progresión ya está en tu historial de hoy.</strong><p>{selectedProgression.steps.length} acordes · {keyRoot.name} {mode} · {difficulty}</p></div><button onClick={startProgressionRound}>Hacer otra vuelta →</button>
+                </div>
+              ) : (
+                <div className={`current-target ${progressionSessionActive ? "active" : ""}`}>
+                  <div className="target-count"><span>{progressionSessionActive ? `ACORDE ${progressionStep + 1} DE ${selectedProgression.steps.length}` : "LISTO PARA PRACTICAR"}</span><strong>{currentProgressionStep.numeral}</strong></div>
+                  <div className="target-chord"><span>TOCA AHORA</span><strong>{root.name}<b>{selectedChord.suffix}</b></strong><small>{currentProgressionStep.function}</small></div>
+                  <div className="target-notes"><span>NOTAS</span><div>{spelledNotes.map((note, index) => <i className={activePitchClasses.includes(mod(root.pc + selectedChord.intervals[index])) ? "played" : ""} key={`${note}-${index}`}>{note}</i>)}</div></div>
+                  <div className="target-action">{progressionSessionActive ? <div className={isCorrect ? "ready correct" : "ready"}><i>{isCorrect ? "✓" : "●"}</i><span>{feedbackLabel}</span></div> : <button onClick={startProgressionRound}>Comenzar vuelta →</button>}</div>
+                </div>
+              )}
+
+              <div className="keyboard-heading"><div><span className="keyboard-dot" /> <strong>{midiState === "connected" ? deviceName : "Teclado de progresiones"}</strong><small>Completa cada acorde en cualquier inversión u octava</small></div><div className="legend"><span><i className="target" /> Objetivo</span><span><i className="played" /> Tocando</span><span><i className="wrong" /> Fuera</span></div></div>
+              <PianoKeyboard targetNotes={targetNotes} activeNotes={activeNotes} noteNames={noteNameMap} onDown={pressNote} onUp={releaseNote} />
+              <div className="trainer-tip"><span>POR QUÉ FUNCIONA</span><p>{selectedChord.explanation}</p><button onClick={() => auditionProgressionStep(progressionStep)}>♪ Escuchar este acorde</button></div>
+            </section>
+          </div>
+        </section>
       ) : (
         <section className="theory-layout">
           <aside className="lesson-index">

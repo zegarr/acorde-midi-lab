@@ -10,17 +10,17 @@ export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const imageUrl = `${protocol}://${host}/og.png`;
+  const imageUrl = `${protocol}://${host}/og-progressions.png`;
 
   return {
     title: "ACORDE — Aprende, toca y entiende la armonía",
-    description: "Laboratorio interactivo de acordes, inversiones, extensiones y teoría musical con conexión MIDI en tiempo real.",
+    description: "Laboratorio interactivo de acordes y progresiones con práctica diaria, seguimiento local y conexión MIDI en tiempo real.",
     openGraph: {
       title: "ACORDE — Aprende. Toca. Entiende.",
-      description: "Acordes, teoría y feedback MIDI en tiempo real.",
+      description: "Practica progresiones, recibe feedback MIDI y guarda tu avance diario.",
       images: [{ url: imageUrl, width: 1536, height: 1024, alt: "ACORDE, laboratorio interactivo de armonía" }],
     },
-    twitter: { card: "summary_large_image", title: "ACORDE", description: "Aprende. Toca. Entiende.", images: [imageUrl] },
+    twitter: { card: "summary_large_image", title: "ACORDE", description: "Practica progresiones. Guarda tu avance.", images: [imageUrl] },
   };
 }
 
